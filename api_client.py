@@ -12,12 +12,12 @@ class RecipeAPIClient:
     def register(self, username, email, password):
         """Регистрация пользователя"""
 
-        url = f'{self.base_url}/user/register/'
+        url = f'{self.base_url}/auth/register/'
         data = {
             'username': username,
             'email': email,
             'password': password,
-            'password2': password,
+            'password2': password
         }
 
         try:
@@ -33,10 +33,10 @@ class RecipeAPIClient:
     def login(self, username, password):
         """Логин пользователя"""
 
-        url = f'{self.base_url}/user/login/'
+        url = f'{self.base_url}/auth/login/'
         data = {
             'username': username,
-            'password': password,
+            'password': password
         }
 
         try:
@@ -58,8 +58,8 @@ class RecipeAPIClient:
         try:
             response = requests.get(url, params=params, timeout=10)
             if response.status_code == 200:
-                return True, None
-            return False, response.json()
+                return True, response.json()
+            return False, None
         except Exception as e:
             return False, str(e)
 
@@ -106,9 +106,9 @@ class RecipeAPIClient:
         """Добавить рецепт в избранное"""
 
         if not self.token:
-            return False, "Not authenticated"
+            return False, 'Not authenticated'
 
-        url = f'{self.base_url}/recipes/{recipe_id}/add_to_favorite/'
+        url = f'{self.base_url}/recipes/{recipe_id}/add_to_favorites/'
         headers = {'Authorization': f'Bearer {self.token}'}
 
         try:
@@ -123,7 +123,7 @@ class RecipeAPIClient:
         """получить избранные рецепты"""
 
         if not self.token:
-            return False, "Not authenticated"
+            return False, 'Not authenticated'
 
         url = f'{self.base_url}/recipes/favorites/'
         headers = {'Authorization': f'Bearer {self.token}'}
