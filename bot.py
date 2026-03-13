@@ -7,6 +7,8 @@ from config import BOT_TOKEN
 from api_client import RecipeAPIClient
 from keyboards import get_main_keyboard, get_recipe_keyboard, get_recipe_list_keyboard
 
+user_sessions = {}  # Словарь для хранения токенов: {user_id: {'token': '...', 'username': '...'}}
+
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -45,13 +47,155 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         'Как пользоваться ботом? Нажми:\n\n'
         '🔍 Поиск рецептов — если хочешь ввести слово, по которому ищешь рецепт\n\n'
-        '🎲 Случайный рецепт — если хочешь получить случайный рецепт и не думать\n\n'
+        '🎲 Случайный рецепт — если не хочешь думать, чтобы получить случайный рецепт\n\n'
         '⚡ Быстрые рецепты — если хочешь посмотреть рецепты, которые готовятся до 30 минут\n\n'
         '⭐ Избранное — если хочешь посмотреть свои сохранённые рецепты\n\n'
         'Или просто напиши название блюда:'
     )
 
     await update.message.reply_text(help_text)
+
+
+async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /login"""
+
+    await update.message.reply_text(
+        '🔐 Авторизация\n\n'
+        'Отправь данные в формате:\n'
+        '`username password`\n\n'
+        'Например:\n'
+        '`demo demo1234`',
+        parse_mode='Markdown'
+    )
+    context.user_data['waiting_for_login'] = True
+
+
+async def register_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /register"""
+
+    await update.message.reply_text(
+        '📝 Регистрация\n\n'
+        'Отправь данные в формате:\n'
+        '`username email password`\n\n'
+        'Например:\n'
+        '`myuser user@example.com pass1234`',
+        parse_mode='Markdown'
+    )
+    context.user_data['waiting_for_register'] = True
+
+
+async def logout_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /logout"""
+
+    user_id = update.effective_user.id
+
+    if user_id in user_sessions:
+        username = user_sessions[user_id].get('username', 'Пользователь')
+        del user_sessions[user_id]
+        await update.message.reply_text(
+            f'👋 До свидания, {username}!\n'
+            'Вы вышли из аккаунта',
+            reply_markup=get_main_keyboard()
+        )
+    else:
+        await update.message.reply_text(
+            'Вы не авторизованы',
+            reply_markup=get_main_keyboard()
+        )
+
+
+def get_user_token(user_id: int) -> str:
+    """Получить токен пользователя"""
+
+    session = user_sessions.get(user_id)
+    return session['token'] if session else None
+
+
+def is_authenticated(user_id: int) -> bool:
+    """Проверка авторизации"""
+
+    return user_id in user_sessions
+
+
+async def process_login(update: Update, credentials: str):
+    """Обработка логина"""
+
+    parts = credentials.split()
+
+    if len(parts) != 2:
+        await update.message.reply_text(
+            'Неверный формат\n\n'
+            'Используй формат: `username password`',
+            parse_mode='Markdown',
+            reply_markup=get_main_keyboard()
+        )
+        return
+
+    username, password = parts
+
+    await update.message.reply_text('Авторизация...')
+
+    success, data = api.login(username, password)
+
+    if success:
+        user_id = update.effective_user.id
+        user_sessions[user_id] = {
+            'token': api.token,
+            'username': username
+        }
+
+        await update.message.reply_text(
+            f'Добро пожаловать, {username}!\n\n'
+            'Теперь ты можешь использовать избранное',
+            reply_markup=get_main_keyboard()
+        )
+    else:
+        await update.message.reply_text(
+            'Ошибка авторизации\n\n'
+            'Проверь username и пароль\n'
+            'Или зарегистрируйся: /register',
+            reply_markup=get_main_keyboard()
+        )
+
+
+async def process_register(update: Update, credentials: str):
+    """Обработка регистрации"""
+
+    parts = credentials.split()
+
+    if len(parts) != 3:
+        await update.message.reply_text(
+            'Неверный формат\n\n'
+            'Используй формат: `username email password`',
+            parse_mode='Markdown',
+            reply_markup=get_main_keyboard()
+        )
+        return
+
+    username, email, password = parts
+
+    await update.message.reply_text('Регистрация...')
+
+    success, data = api.register(username, email, password)
+
+    if success:
+        user_id = update.effective_user.id
+        user_sessions[user_id] = {
+            'token': api.token,
+            'username': username
+        }
+
+        await update.message.reply_text(
+            f'Регистрация успешна\n\n'
+            f'Добро пожаловать, {username}!',
+            reply_markup=get_main_keyboard()
+        )
+    else:
+        error_msg = data if isinstance(data, str) else str(data)
+        await update.message.reply_text(
+            f'Ошибка регистрации!\n\n{error_msg}',
+            reply_markup=get_main_keyboard()
+        )
 
 
 async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -108,19 +252,51 @@ async def handle_quick_recipes(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def handle_favorites(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Избранные рецепты"""
+    user_id = update.effective_user.id
 
-    # Сделать авторизацию
-    await update.message.reply_text(
-        'Функция избранного сейчас в разработке!\n'
-        'Скоро добавлю возможность сохранять любимые рецепты',
-        reply_markup=get_main_keyboard()
-    )
+    if not is_authenticated(user_id):
+        await update.message.reply_text(
+            'Для использования избранного нужно авторизоваться\n\n'
+            'Войди в аккаунт: /login\n'
+            'Или зарегистрируйся: /register',
+            reply_markup=get_main_keyboard()
+        )
+        return
+
+        # Устанавливаем токен для API клиента
+    api.token = get_user_token(user_id)
+
+    await update.message.reply_text('Загружаю избранное...')
+
+    success, data = api.get_favorites()
+
+    if success and data:
+        results = data.get('results', [])
+
+        if results:
+            text = f'Избранные рецепты ({len(results)}):\n\nВыбери рецепт:'
+            await update.message.reply_text(
+                text,
+                reply_markup=get_recipe_list_keyboard(results)
+            )
+        else:
+            await update.message.reply_text(
+                'Нет ни одного сохранённого рецепта!\n\n'
+                'Добавляй рецепты в избранное нажимая ⭐ под рецептом',
+                reply_markup=get_main_keyboard()
+            )
+    else:
+        await update.message.reply_text(
+            'Ошибка при загрузке избранного 🥺',
+            reply_markup=get_main_keyboard()
+        )
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка текстовых сообщений"""
 
     text = update.message.text
+    user_id = update.effective_user.id
 
     # Обработка кнопок главного меню
     if text == '🔍 Поиск рецептов':
@@ -137,6 +313,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     elif text == 'ℹ️ Помощь':
         await help_command(update, context)
+        return
+
+    # Обработка логина
+    if context.user_data.get('waiting_for_login'):
+        context.user_data['waiting_for_login'] = False
+        await process_login(update, text)
+        return
+
+    # Обработка регистрации
+    if context.user_data.get('waiting_for_register'):
+        context.user_data['waiting_for_register'] = False
+        await process_register(update, text)
         return
 
     # Если ожидаем поисковый запрос
@@ -218,6 +406,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     data = query.data
+    user_id = update.effective_user.id
 
     # Отображение рецепта
     if data.startswith('recipe_'):
@@ -234,11 +423,33 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Добавление в избранное
     elif data.startswith('fav_'):
-        # Сделать авторизацию
-        await query.message.reply_text(
-            'Функция избранного скоро будет доступна!',
-            reply_markup=get_main_keyboard()
-        )
+        if not is_authenticated(user_id):
+            await query.message.reply_text(
+                'Чтобы использовать избранное войди в аккаунт: /login',
+                reply_markup=get_main_keyboard()
+            )
+            return
+
+        recipe_id = data.split('_')[1]
+
+        # Устанавливаем токен
+        api.token = get_user_token(user_id)
+
+        success, result = api.add_to_favorites(recipe_id)
+
+        if success:
+            await query.answer('Добавлено в избранное!')
+            await query.message.reply_text(
+                'Рецепт добавлен в избранное!\n\n'
+                'Смотри все избранные: нажми ⭐ Избранное',
+                reply_markup=get_main_keyboard()
+            )
+        else:
+            await query.answer('Ошибка')
+            await query.message.reply_text(
+                'Не удалось добавить в избранное 🥺',
+                reply_markup=get_main_keyboard()
+            )
 
     # Назад
     elif data == 'back':
@@ -263,6 +474,9 @@ def main():
     # Регистрируем обработчики
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('help', help_command))
+    application.add_handler(CommandHandler('login', login_command))
+    application.add_handler(CommandHandler('register', register_command))
+    application.add_handler(CommandHandler('logout', logout_command))
 
     # Обработчик callback кнопок
     application.add_handler(CallbackQueryHandler(handle_callback))
