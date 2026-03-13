@@ -32,8 +32,8 @@ def get_recipe_list_keyboard(recipes):
     for i, recipe in enumerate(recipes[:10], 1):
         keyboard.append([
             InlineKeyboardButton(
-                f'{i}. {recipe['title']}',
-                callback_data=f'recipe_{recipe['id']}'
+                f'{i}. {recipe["title"]}',
+                callback_data=f'recipe_{recipe["id"]}'
             )
         ])
 
