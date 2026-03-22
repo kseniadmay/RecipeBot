@@ -136,3 +136,46 @@ class RecipeAPIClient:
             return False, None
         except Exception as e:
             return False, str(e)
+
+    def get_notification_settings(self):
+        """Получить настройки email уведомлений"""
+
+        if not self.token:
+            return False, 'Not authenticated'
+
+        try:
+            response = requests.get(
+                f'{self.base_url}/settings/notifications/',
+                headers=self._get_headers()
+            )
+
+            if response.status_code == 200:
+                return True, response.json()
+            else:
+                return False, response.json()
+
+        except Exception as e:
+            logger.error(f'Ошибка при получении настроек: {e}')
+            return False, str(e)
+
+    def update_notification_settings(self, email_notifications: bool):
+        """Обновить настройки email уведомлений"""
+
+        if not self.token:
+            return False, 'Not authenticated'
+
+        try:
+            response = requests.patch(
+                f'{self.base_url}/settings/notifications/',
+                headers=self._get_headers(),
+                json={'email_notifications': email_notifications}
+            )
+
+            if response.status_code == 200:
+                return True, response.json()
+            else:
+                return False, response.json()
+
+        except Exception as e:
+            logger.error(f'Ошибка при обновлении настроек: {e}')
+            return False, str(e)

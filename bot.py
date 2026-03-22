@@ -5,7 +5,7 @@ import re
 
 from config import BOT_TOKEN
 from api_client import RecipeAPIClient
-from keyboards import get_main_keyboard, get_recipe_keyboard, get_recipe_list_keyboard
+from keyboards import get_main_keyboard, get_recipe_keyboard, get_recipe_list_keyboard, get_notifications_keyboard
 
 user_sessions = {}  # Словарь для хранения токенов: {user_id: {'token': '...', 'username': '...'}}
 
@@ -292,6 +292,101 @@ async def handle_favorites(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def handle_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Управление email уведомлениями"""
+
+    user_id = update.effective_user.id
+
+    if not is_authenticated(user_id):
+        await update.message.reply_text(
+            'Для управления уведомлениями нужно авторизоваться\n\n'
+            'Войди в аккаунт: /login\n'
+            'Или зарегистрируйся: /register',
+            reply_markup=get_main_keyboard()
+        )
+        return
+
+    # Устанавливаем токен
+    api.token = get_user_token(user_id)
+
+    await update.message.reply_text('Загружаю настройки...')
+
+    success, data = api.get_notification_settings()
+
+    if success and data:
+        is_enabled = data.get('email_notifications', False)
+
+        status_emoji = '🔔' if is_enabled else '🔕'
+        status_text = 'включены' if is_enabled else 'отключены'
+
+        text = (
+            f'{status_emoji} Email уведомления\n\n'
+            f'Статус: {status_text}\n\n'
+            f'Ежедневный дайджест с рецептами приходит на вашу почту каждый день в 13:00 МСК.\n\n'
+            f'{"✅ Вы получаете дайджесты" if is_enabled else "❌ Вы не получаете дайджесты"}'
+        )
+
+        await update.message.reply_text(
+            text,
+            reply_markup=get_notifications_keyboard(is_enabled)
+        )
+    else:
+        await update.message.reply_text(
+            'Ошибка при загрузке настроек 🥺',
+            reply_markup=get_main_keyboard()
+        )
+
+
+async def toggle_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE, current_status: bool):
+    """Переключение email уведомлений"""
+
+    query = update.callback_query
+    user_id = update.effective_user.id
+
+    if not is_authenticated(user_id):
+        await query.message.reply_text(
+            'Ошибка авторизации',
+            reply_markup=get_main_keyboard()
+        )
+        return
+
+    # Устанавливаем токен
+    api.token = get_user_token(user_id)
+
+    # Переключаем статус
+    new_status = not current_status
+
+    success, data = api.update_notification_settings(new_status)
+
+    if success and data:
+        is_enabled = data.get('email_notifications', False)
+
+        status_emoji = '🔔' if is_enabled else '🔕'
+        status_text = 'включены' if is_enabled else 'отключены'
+        success_msg = '✅ Уведомления включены!' if is_enabled else '✅ Уведомления отключены!'
+
+        text = (
+            f'{status_emoji} Email уведомления\n\n'
+            f'Статус: {status_text}\n\n'
+            f'{success_msg}\n\n'
+            f'Ежедневный дайджест с рецептами приходит на вашу почту каждый день в 13:00 МСК.\n\n'
+            f'{"✅ Вы получаете дайджесты" if is_enabled else "❌ Вы не получаете дайджесты"}'
+        )
+
+        await query.message.edit_text(
+            text,
+            reply_markup=get_notifications_keyboard(is_enabled)
+        )
+
+        await query.answer(success_msg)
+    else:
+        await query.answer('Ошибка')
+        await query.message.reply_text(
+            'Не удалось изменить настройки 🥺',
+            reply_markup=get_main_keyboard()
+        )
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка текстовых сообщений"""
 
@@ -310,6 +405,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     elif text == '⭐ Избранное':
         await handle_favorites(update, context)
+        return
+    elif text == '🔔 Уведомления':
+        await handle_notifications(update, context)
         return
     elif text == 'ℹ️ Помощь':
         await help_command(update, context)
@@ -450,6 +548,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'Не удалось добавить в избранное 🥺',
                 reply_markup=get_main_keyboard()
             )
+
+    # Переключение уведомлений
+    elif data.startswith('toggle_notifications_'):
+        current_status = data.split('_')[-1] == 'True'
+        await toggle_notifications(update, context, current_status)
 
     # Назад
     elif data == 'back':
