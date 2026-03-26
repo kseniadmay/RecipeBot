@@ -3,7 +3,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 import re
 
-from config import BOT_TOKEN
+from config import BOT_TOKEN, API_BASE_URL
 from api_client import RecipeAPIClient
 from keyboards import get_main_keyboard, get_recipe_keyboard, get_recipe_list_keyboard, get_notifications_keyboard
 
@@ -465,36 +465,121 @@ async def search_recipes(update: Update, query: str):
 async def send_recipe(update: Update, recipe: dict):
     """Отправка рецепта пользователю"""
 
-    # Формируем текст рецепта
-    text = f'🍳 {recipe['title']}\n\n'
-    text += f'📝 {recipe['description']}\n\n'
-    text += f'⏱️ Время: {recipe['cook_time']} минут\n'
-    text += f'👥 Порций: {recipe['servings']}\n'
-    text += f'⭐ Сложность: {recipe.get('difficulty', 'Средняя')}\n'
+    # Формируем краткий текст для caption (до 1024 символов)
+    caption = f'🍳 **{recipe["title"]}**\n\n'
+    caption += f'{recipe["description"]}\n\n'
+    caption += '═══════════════════\n'
+    caption += f'⏱️ Время: **{recipe["cook_time"]} мин**\n'
+    caption += f'👥 Порций: **{recipe["servings"]}**\n'
+
+    # Сложность
+    difficulty_map = {
+        'easy': 'Легко',
+        'medium': 'Средне',
+        'hard': 'Сложно'
+    }
+    difficulty = difficulty_map.get(recipe.get('difficulty', 'medium'), 'Средне')
+    caption += f'⭐ Сложность: **{difficulty}**'
+
+    # Формируем ПОЛНЫЙ текст с ингредиентами и шагами
+    full_text = ''
 
     # Ингредиенты
     if recipe.get('ingredients'):
-        text += '\n📋 Ингредиенты:\n'
+        full_text += '\n\n📋 **ИНГРЕДИЕНТЫ:**\n'
         for ing in recipe['ingredients']:
-            text += f'• {ing['name']} — {ing['amount']} {ing['unit']}\n'
+            # Форматируем количество
+            amount = ing['amount']
+            if isinstance(amount, float) and amount.is_integer():
+                amount = int(amount)
 
-    # Шаги
+            unit = ing.get('unit', '')
+            if unit:
+                full_text += f'  • {ing["name"]} — {amount} {unit}\n'
+            else:
+                full_text += f'  • {ing["name"]} — {amount}\n'
+
+    # Шаги приготовления
     if recipe.get('steps'):
-        text += '\n👨‍🍳 Приготовление:\n'
+        full_text += '\n👨‍🍳 **ПРИГОТОВЛЕНИЕ:**\n'
         for step in recipe['steps']:
-            text += f'{step['order']}. {step['description']}\n'
+            full_text += f'\n**{step["order"]}.** {step["description"]}\n'
 
-    # Отправляем
-    if update.callback_query:
-        await update.callback_query.message.edit_text(
-            text,
-            reply_markup=get_recipe_keyboard(recipe['id'])
-        )
+    # Если есть изображение
+    image_url = recipe.get('image')
+
+    if image_url:
+        # Преобразуем относительный путь в абсолютный URL
+        if not image_url.startswith('http'):
+            from config import API_BASE_URL
+            if API_BASE_URL.endswith('/api'):
+                base_url = API_BASE_URL[:-4]
+            else:
+                base_url = API_BASE_URL
+            image_url = f'{base_url}{image_url}'
+
+        # Отправляем фото с кратким caption
+        try:
+            if update.callback_query:
+                await update.callback_query.message.delete()
+                # Отправляем фото
+                await update.callback_query.message.reply_photo(
+                    photo=image_url,
+                    caption=caption,
+                    parse_mode='Markdown'
+                )
+                # Отправляем полный текст отдельным сообщением
+                await update.callback_query.message.reply_text(
+                    full_text,
+                    reply_markup=get_recipe_keyboard(recipe['id']),
+                    parse_mode='Markdown'
+                )
+            else:
+                # Отправляем фото
+                await update.message.reply_photo(
+                    photo=image_url,
+                    caption=caption,
+                    parse_mode='Markdown'
+                )
+                # Отправляем полный текст отдельным сообщением
+                await update.message.reply_text(
+                    full_text,
+                    reply_markup=get_recipe_keyboard(recipe['id']),
+                    parse_mode='Markdown'
+                )
+
+        except Exception as e:
+            logger.error(f'Ошибка при отправке фото: {e}')
+            # Если не удалось отправить фото, отправляем всё текстом
+            complete_text = caption + full_text
+            if update.callback_query:
+                await update.callback_query.message.edit_text(
+                    complete_text,
+                    reply_markup=get_recipe_keyboard(recipe['id']),
+                    parse_mode='Markdown'
+                )
+            else:
+                await update.message.reply_text(
+                    complete_text,
+                    reply_markup=get_recipe_keyboard(recipe['id']),
+                    parse_mode='Markdown'
+                )
+
     else:
-        await update.message.reply_text(
-            text,
-            reply_markup=get_recipe_keyboard(recipe['id'])
-        )
+        # Нет фото - отправляем всё текстом
+        complete_text = caption + full_text
+        if update.callback_query:
+            await update.callback_query.message.edit_text(
+                complete_text,
+                reply_markup=get_recipe_keyboard(recipe['id']),
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text(
+                complete_text,
+                reply_markup=get_recipe_keyboard(recipe['id']),
+                parse_mode='Markdown'
+            )
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
